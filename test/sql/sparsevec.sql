@@ -175,3 +175,60 @@ SELECT sparsevec(ARRAY[1, NULL]::int[], ARRAY[1.0,2.0]::real[], 5);
 SELECT sparsevec(ARRAY[1,3], ARRAY[2,4]::integer[], 5);
 SELECT sparsevec(ARRAY[1,3], ARRAY[1.5,3.5]::double precision[], 5);
 SELECT sparsevec(ARRAY[1,3], ARRAY[1.5,3.5]::numeric[], 5);
+
+-- arithmetic operators
+
+-- addition: disjoint indices (union)
+SELECT '{1:1,3:2}/5'::sparsevec + '{2:3,4:4}/5';
+-- addition: overlapping indices
+SELECT '{1:1,2:2,3:3}/5'::sparsevec + '{1:10,3:30,5:50}/5';
+-- addition: all indices shared
+SELECT '{1:1,2:2}/3'::sparsevec + '{1:4,2:5}/3';
+-- addition: cancellation produces zeros (must be dropped from sparse result)
+SELECT '{1:1,2:2}/3'::sparsevec + '{1:-1,2:-2}/3';
+-- addition: one operand empty
+SELECT '{}/3'::sparsevec + '{1:1,2:2}/3';
+SELECT '{1:1,2:2}/3'::sparsevec + '{}/3';
+-- addition: both empty
+SELECT '{}/3'::sparsevec + '{}/3';
+-- addition: dimension mismatch
+SELECT '{1:1}/2'::sparsevec + '{1:1}/3';
+-- addition: overflow
+SELECT '{1:3e38}/1'::sparsevec + '{1:3e38}/1';
+
+-- subtraction: disjoint indices (b indices negated)
+SELECT '{1:1,3:2}/5'::sparsevec - '{2:3,4:4}/5';
+-- subtraction: overlapping indices
+SELECT '{1:10,2:2,3:3}/5'::sparsevec - '{1:1,3:30,5:50}/5';
+-- subtraction: cancellation produces zeros (must be dropped from sparse result)
+SELECT '{1:1,2:2}/3'::sparsevec - '{1:1,2:2}/3';
+-- subtraction: one operand empty
+SELECT '{}/3'::sparsevec - '{1:1,2:2}/3';
+SELECT '{1:1,2:2}/3'::sparsevec - '{}/3';
+-- subtraction: dimension mismatch
+SELECT '{1:1}/2'::sparsevec - '{1:1}/3';
+-- subtraction: overflow
+SELECT '{1:3e38}/1'::sparsevec - '{1:-3e38}/1';
+
+-- multiplication: intersection of indices
+SELECT '{1:2,3:4}/5'::sparsevec * '{1:3,2:5}/5';
+-- multiplication: fully overlapping indices
+SELECT '{1:2,2:3}/3'::sparsevec * '{1:4,2:5}/3';
+-- multiplication: disjoint indices (result is empty)
+SELECT '{1:1,3:3}/5'::sparsevec * '{2:2,4:4}/5';
+-- multiplication: one operand empty
+SELECT '{}/3'::sparsevec * '{1:1,2:2}/3';
+-- multiplication: dimension mismatch
+SELECT '{1:1}/2'::sparsevec * '{1:1}/3';
+-- multiplication: overflow
+SELECT '{1:3e38}/1'::sparsevec * '{1:3e38}/1';
+-- multiplication: underflow
+SELECT '{1:1e-37}/1'::sparsevec * '{1:1e-37}/1';
+
+-- cross-type arithmetic with vector (implicit cast vector -> sparsevec)
+SELECT '[1,0,2]'::vector + '{1:10,3:5}/3'::sparsevec;
+SELECT '[1,0,2]'::vector - '{1:10,3:5}/3'::sparsevec;
+SELECT '[1,0,2]'::vector * '{1:10,3:5}/3'::sparsevec;
+SELECT '{1:10,3:5}/3'::sparsevec + '[1,0,2]'::vector;
+SELECT '{1:10,3:5}/3'::sparsevec - '[1,0,2]'::vector;
+SELECT '{1:10,3:5}/3'::sparsevec * '[1,0,2]'::vector;

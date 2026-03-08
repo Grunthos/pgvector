@@ -1387,6 +1387,296 @@ sparsevec_gt(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Add sparse vectors
+ *
+ * Note: sparsevec_add and sparsevec_sub share substantial structure and could
+ * be unified via a helper, but this mirrors the pattern of
+ * SparsevecL2SquaredDistance and SparsevecInnerProduct above, which are also
+ * kept separate despite similar merge loops.
+ */
+FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_add);
+Datum
+sparsevec_add(PG_FUNCTION_ARGS)
+{
+	SparseVector *a = PG_GETARG_SPARSEVEC_P(0);
+	SparseVector *b = PG_GETARG_SPARSEVEC_P(1);
+	float	   *ax = SPARSEVEC_VALUES(a);
+	float	   *bx = SPARSEVEC_VALUES(b);
+	int			maxnnz;
+	int32	   *tidx;
+	float	   *tval;
+	int			nnz = 0;
+	int			i = 0,
+				j = 0;
+	SparseVector *result;
+	float	   *rx;
+
+	CheckDims(a, b);
+
+	/*
+	 * Collect results into temporary index/value arrays before allocating the
+	 * result, since the final nnz is not known until after the merge and the
+	 * SparseVector layout requires nnz to be fixed at allocation time.
+	 *
+	 * At most a->nnz + b->nnz elements can be non-zero (union of both sets).
+	 */
+	maxnnz = a->nnz + b->nnz;
+	tidx = palloc(maxnnz * sizeof(int32));
+	tval = palloc(maxnnz * sizeof(float));
+
+	/* Union merge: walk both sorted index lists simultaneously */
+	while (i < a->nnz && j < b->nnz)
+	{
+		if (a->indices[i] < b->indices[j])
+		{
+			tidx[nnz] = a->indices[i];
+			tval[nnz] = ax[i];
+			nnz++;
+			i++;
+		}
+		else if (a->indices[i] > b->indices[j])
+		{
+			tidx[nnz] = b->indices[j];
+			tval[nnz] = bx[j];
+			nnz++;
+			j++;
+		}
+		else
+		{
+			float		sum = ax[i] + bx[j];
+
+			/* Cancellation can produce zero; drop it from the sparse representation */
+			if (sum != 0)
+			{
+				tidx[nnz] = a->indices[i];
+				tval[nnz] = sum;
+				nnz++;
+			}
+			i++;
+			j++;
+		}
+	}
+
+	/* Append remaining elements from whichever input is not exhausted */
+	while (i < a->nnz)
+	{
+		tidx[nnz] = a->indices[i];
+		tval[nnz] = ax[i];
+		nnz++;
+		i++;
+	}
+
+	while (j < b->nnz)
+	{
+		tidx[nnz] = b->indices[j];
+		tval[nnz] = bx[j];
+		nnz++;
+		j++;
+	}
+
+	/* Check for overflow */
+	for (int k = 0; k < nnz; k++)
+	{
+		if (isinf(tval[k]))
+			float_overflow_error();
+	}
+
+	result = InitSparseVector(a->dim, nnz);
+	rx = SPARSEVEC_VALUES(result);
+	for (int k = 0; k < nnz; k++)
+	{
+		result->indices[k] = tidx[k];
+		rx[k] = tval[k];
+	}
+
+	pfree(tidx);
+	pfree(tval);
+
+	PG_RETURN_POINTER(result);
+}
+
+/*
+ * Subtract sparse vectors
+ */
+FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_sub);
+Datum
+sparsevec_sub(PG_FUNCTION_ARGS)
+{
+	SparseVector *a = PG_GETARG_SPARSEVEC_P(0);
+	SparseVector *b = PG_GETARG_SPARSEVEC_P(1);
+	float	   *ax = SPARSEVEC_VALUES(a);
+	float	   *bx = SPARSEVEC_VALUES(b);
+	int			maxnnz;
+	int32	   *tidx;
+	float	   *tval;
+	int			nnz = 0;
+	int			i = 0,
+				j = 0;
+	SparseVector *result;
+	float	   *rx;
+
+	CheckDims(a, b);
+
+	/*
+	 * Collect results into temporary index/value arrays before allocating the
+	 * result, since the final nnz is not known until after the merge and the
+	 * SparseVector layout requires nnz to be fixed at allocation time.
+	 *
+	 * At most a->nnz + b->nnz elements can be non-zero (union of both sets).
+	 */
+	maxnnz = a->nnz + b->nnz;
+	tidx = palloc(maxnnz * sizeof(int32));
+	tval = palloc(maxnnz * sizeof(float));
+
+	/* Union merge: walk both sorted index lists simultaneously */
+	while (i < a->nnz && j < b->nnz)
+	{
+		if (a->indices[i] < b->indices[j])
+		{
+			tidx[nnz] = a->indices[i];
+			tval[nnz] = ax[i];
+			nnz++;
+			i++;
+		}
+		else if (a->indices[i] > b->indices[j])
+		{
+			tidx[nnz] = b->indices[j];
+			tval[nnz] = -bx[j];
+			nnz++;
+			j++;
+		}
+		else
+		{
+			float		diff = ax[i] - bx[j];
+
+			/* Cancellation can produce zero; drop it from the sparse representation */
+			if (diff != 0)
+			{
+				tidx[nnz] = a->indices[i];
+				tval[nnz] = diff;
+				nnz++;
+			}
+			i++;
+			j++;
+		}
+	}
+
+	/* Append remaining elements from whichever input is not exhausted */
+	while (i < a->nnz)
+	{
+		tidx[nnz] = a->indices[i];
+		tval[nnz] = ax[i];
+		nnz++;
+		i++;
+	}
+
+	while (j < b->nnz)
+	{
+		tidx[nnz] = b->indices[j];
+		tval[nnz] = -bx[j];
+		nnz++;
+		j++;
+	}
+
+	/* Check for overflow */
+	for (int k = 0; k < nnz; k++)
+	{
+		if (isinf(tval[k]))
+			float_overflow_error();
+	}
+
+	result = InitSparseVector(a->dim, nnz);
+	rx = SPARSEVEC_VALUES(result);
+	for (int k = 0; k < nnz; k++)
+	{
+		result->indices[k] = tidx[k];
+		rx[k] = tval[k];
+	}
+
+	pfree(tidx);
+	pfree(tval);
+
+	PG_RETURN_POINTER(result);
+}
+
+/*
+ * Multiply sparse vectors
+ */
+FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_mul);
+Datum
+sparsevec_mul(PG_FUNCTION_ARGS)
+{
+	SparseVector *a = PG_GETARG_SPARSEVEC_P(0);
+	SparseVector *b = PG_GETARG_SPARSEVEC_P(1);
+	float	   *ax = SPARSEVEC_VALUES(a);
+	float	   *bx = SPARSEVEC_VALUES(b);
+	int			maxnnz;
+	int32	   *tidx;
+	float	   *tval;
+	int			nnz = 0;
+	int			i = 0,
+				j = 0;
+	SparseVector *result;
+	float	   *rx;
+
+	CheckDims(a, b);
+
+	/*
+	 * Collect results into temporary index/value arrays before allocating the
+	 * result, since the final nnz is not known until after the merge and the
+	 * SparseVector layout requires nnz to be fixed at allocation time.
+	 *
+	 * At most min(a->nnz, b->nnz) elements can be non-zero: only indices
+	 * present in both vectors (intersection) can have a non-zero product.
+	 */
+	maxnnz = Min(a->nnz, b->nnz);
+	tidx = palloc(maxnnz * sizeof(int32));
+	tval = palloc(maxnnz * sizeof(float));
+
+	/* Intersection merge: walk both sorted index lists simultaneously */
+	while (i < a->nnz && j < b->nnz)
+	{
+		if (a->indices[i] < b->indices[j])
+			i++;
+		else if (a->indices[i] > b->indices[j])
+			j++;
+		else
+		{
+			float		prod = ax[i] * bx[j];
+
+			if (isinf(prod))
+				float_overflow_error();
+
+			if (prod == 0 && !(ax[i] == 0 || bx[j] == 0))
+				float_underflow_error();
+
+			/* Underflow already caught above; drop exact zeros */
+			if (prod != 0)
+			{
+				tidx[nnz] = a->indices[i];
+				tval[nnz] = prod;
+				nnz++;
+			}
+			i++;
+			j++;
+		}
+	}
+
+	result = InitSparseVector(a->dim, nnz);
+	rx = SPARSEVEC_VALUES(result);
+	for (int k = 0; k < nnz; k++)
+	{
+		result->indices[k] = tidx[k];
+		rx[k] = tval[k];
+	}
+
+	pfree(tidx);
+	pfree(tval);
+
+	PG_RETURN_POINTER(result);
+}
+
+/*
  * Compare sparse vectors
  */
 FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_cmp);

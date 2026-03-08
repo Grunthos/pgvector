@@ -748,6 +748,17 @@ CREATE FUNCTION sparsevec(int[], integer[], int) RETURNS sparsevec
 CREATE FUNCTION sparsevec(int[], numeric[], int) RETURNS sparsevec
 	AS 'MODULE_PATHNAME', 'sparsevec_coo' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
+-- sparsevec arithmetic functions
+
+CREATE FUNCTION sparsevec_add(sparsevec, sparsevec) RETURNS sparsevec
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+CREATE FUNCTION sparsevec_sub(sparsevec, sparsevec) RETURNS sparsevec
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+CREATE FUNCTION sparsevec_mul(sparsevec, sparsevec) RETURNS sparsevec
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
 -- sparsevec private functions
 
 CREATE FUNCTION sparsevec_lt(sparsevec, sparsevec) RETURNS bool
@@ -855,6 +866,20 @@ CREATE OPERATOR <=> (
 CREATE OPERATOR <+> (
 	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = l1_distance,
 	COMMUTATOR = '<+>'
+);
+
+CREATE OPERATOR + (
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_add,
+	COMMUTATOR = +
+);
+
+CREATE OPERATOR - (
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_sub
+);
+
+CREATE OPERATOR * (
+	LEFTARG = sparsevec, RIGHTARG = sparsevec, PROCEDURE = sparsevec_mul,
+	COMMUTATOR = *
 );
 
 CREATE OPERATOR < (

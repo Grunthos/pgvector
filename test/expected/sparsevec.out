@@ -746,3 +746,172 @@ SELECT sparsevec(ARRAY[1,3], ARRAY[1.5,3.5]::numeric[], 5);
  {1:1.5,3:3.5}/5
 (1 row)
 
+-- arithmetic operators
+-- addition: disjoint indices (union)
+SELECT '{1:1,3:2}/5'::sparsevec + '{2:3,4:4}/5';
+      ?column?       
+---------------------
+ {1:1,2:3,3:2,4:4}/5
+(1 row)
+
+-- addition: overlapping indices
+SELECT '{1:1,2:2,3:3}/5'::sparsevec + '{1:10,3:30,5:50}/5';
+        ?column?        
+------------------------
+ {1:11,2:2,3:33,5:50}/5
+(1 row)
+
+-- addition: all indices shared
+SELECT '{1:1,2:2}/3'::sparsevec + '{1:4,2:5}/3';
+  ?column?   
+-------------
+ {1:5,2:7}/3
+(1 row)
+
+-- addition: cancellation produces zeros (must be dropped from sparse result)
+SELECT '{1:1,2:2}/3'::sparsevec + '{1:-1,2:-2}/3';
+ ?column? 
+----------
+ {}/3
+(1 row)
+
+-- addition: one operand empty
+SELECT '{}/3'::sparsevec + '{1:1,2:2}/3';
+  ?column?   
+-------------
+ {1:1,2:2}/3
+(1 row)
+
+SELECT '{1:1,2:2}/3'::sparsevec + '{}/3';
+  ?column?   
+-------------
+ {1:1,2:2}/3
+(1 row)
+
+-- addition: both empty
+SELECT '{}/3'::sparsevec + '{}/3';
+ ?column? 
+----------
+ {}/3
+(1 row)
+
+-- addition: dimension mismatch
+SELECT '{1:1}/2'::sparsevec + '{1:1}/3';
+ERROR:  different sparsevec dimensions 2 and 3
+-- addition: overflow
+SELECT '{1:3e38}/1'::sparsevec + '{1:3e38}/1';
+ERROR:  value out of range: overflow
+-- subtraction: disjoint indices (b indices negated)
+SELECT '{1:1,3:2}/5'::sparsevec - '{2:3,4:4}/5';
+       ?column?        
+-----------------------
+ {1:1,2:-3,3:2,4:-4}/5
+(1 row)
+
+-- subtraction: overlapping indices
+SELECT '{1:10,2:2,3:3}/5'::sparsevec - '{1:1,3:30,5:50}/5';
+        ?column?         
+-------------------------
+ {1:9,2:2,3:-27,5:-50}/5
+(1 row)
+
+-- subtraction: cancellation produces zeros (must be dropped from sparse result)
+SELECT '{1:1,2:2}/3'::sparsevec - '{1:1,2:2}/3';
+ ?column? 
+----------
+ {}/3
+(1 row)
+
+-- subtraction: one operand empty
+SELECT '{}/3'::sparsevec - '{1:1,2:2}/3';
+   ?column?    
+---------------
+ {1:-1,2:-2}/3
+(1 row)
+
+SELECT '{1:1,2:2}/3'::sparsevec - '{}/3';
+  ?column?   
+-------------
+ {1:1,2:2}/3
+(1 row)
+
+-- subtraction: dimension mismatch
+SELECT '{1:1}/2'::sparsevec - '{1:1}/3';
+ERROR:  different sparsevec dimensions 2 and 3
+-- subtraction: overflow
+SELECT '{1:3e38}/1'::sparsevec - '{1:-3e38}/1';
+ERROR:  value out of range: overflow
+-- multiplication: intersection of indices
+SELECT '{1:2,3:4}/5'::sparsevec * '{1:3,2:5}/5';
+ ?column? 
+----------
+ {1:6}/5
+(1 row)
+
+-- multiplication: fully overlapping indices
+SELECT '{1:2,2:3}/3'::sparsevec * '{1:4,2:5}/3';
+   ?column?   
+--------------
+ {1:8,2:15}/3
+(1 row)
+
+-- multiplication: disjoint indices (result is empty)
+SELECT '{1:1,3:3}/5'::sparsevec * '{2:2,4:4}/5';
+ ?column? 
+----------
+ {}/5
+(1 row)
+
+-- multiplication: one operand empty
+SELECT '{}/3'::sparsevec * '{1:1,2:2}/3';
+ ?column? 
+----------
+ {}/3
+(1 row)
+
+-- multiplication: dimension mismatch
+SELECT '{1:1}/2'::sparsevec * '{1:1}/3';
+ERROR:  different sparsevec dimensions 2 and 3
+-- multiplication: overflow
+SELECT '{1:3e38}/1'::sparsevec * '{1:3e38}/1';
+ERROR:  value out of range: overflow
+-- multiplication: underflow
+SELECT '{1:1e-37}/1'::sparsevec * '{1:1e-37}/1';
+ERROR:  value out of range: underflow
+-- cross-type arithmetic with vector (implicit cast vector -> sparsevec)
+SELECT '[1,0,2]'::vector + '{1:10,3:5}/3'::sparsevec;
+   ?column?   
+--------------
+ {1:11,3:7}/3
+(1 row)
+
+SELECT '[1,0,2]'::vector - '{1:10,3:5}/3'::sparsevec;
+   ?column?    
+---------------
+ {1:-9,3:-3}/3
+(1 row)
+
+SELECT '[1,0,2]'::vector * '{1:10,3:5}/3'::sparsevec;
+   ?column?    
+---------------
+ {1:10,3:10}/3
+(1 row)
+
+SELECT '{1:10,3:5}/3'::sparsevec + '[1,0,2]'::vector;
+   ?column?   
+--------------
+ {1:11,3:7}/3
+(1 row)
+
+SELECT '{1:10,3:5}/3'::sparsevec - '[1,0,2]'::vector;
+  ?column?   
+-------------
+ {1:9,3:3}/3
+(1 row)
+
+SELECT '{1:10,3:5}/3'::sparsevec * '[1,0,2]'::vector;
+   ?column?    
+---------------
+ {1:10,3:10}/3
+(1 row)
+
